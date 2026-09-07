@@ -1,0 +1,3 @@
+"""
+Collision detection package.
+"""

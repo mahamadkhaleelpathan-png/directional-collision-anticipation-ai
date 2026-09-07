@@ -1,0 +1,69 @@
+# TypeScript build outputs are ignored below (dist/); SOURCE (.ts/.tsx) must be committed.
+
+# Build outputs
+lib/
+dist/
+build/
+
+# Dependencies
+node_modules/
+.pnp.*
+pnpm-lock.yaml
+yarn.lock
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# Temporary files
+*.tmp
+*.temp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files
+data/*/
+output/*/
+
+# Virtual environments
+venv/
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Model files
+*.pt
+*.pth
+
+# Videos
+*.mp4
+*.avi
+*.mkv
+*.webm
+
+# Temporary files
+temp/
+
+# Test/PID caches
+.pytest_cache/
+.server_pid_backend
+.server_pid_frontend

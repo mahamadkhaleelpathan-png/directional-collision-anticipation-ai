@@ -1,0 +1,10 @@
+{
+  "_instructions": "Road-plane calibration for vehicle speed estimation. Click A(top-left) B(top-right) C(bottom-right) D(bottom-left) on a real frame to map image pixels to world ground metres. width_m = A->B (road width), depth_m = A->D (distance ahead). Enabled only when configured=true. See SPEED_ESTIMATION.md.",
+  "configured": false,
+  "source": "none",
+  "image_points": [],
+  "world_points_meters": [],
+  "width_m": null,
+  "depth_m": null,
+  "note": "SPEED N/A - CALIBRATION REQUIRED. Click CALIBRATE SPEED to map 4 road points to known world dimensions."
+}

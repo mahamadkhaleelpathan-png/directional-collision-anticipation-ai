@@ -1,0 +1,619 @@
+================================================================================
+    AI-DRIVEN DIRECTIONAL COLLISION ANTICIPATION SYSTEM
+    PROJECT PRESENTATION - COMPLETE EXPLANATION (7 SLIDES)
+================================================================================
+
+
+SLIDE 1: INTRODUCTION - WHAT WE BUILT AND WHY
+--------------------------------------------------------------------------------
+
+We built an AI-Driven Directional Collision Anticipation System. In simple terms,
+this is a smart safety system that watches traffic through a camera (like a dashcam),
+figures out what is happening on the road, and warns the driver BEFORE a crash
+happens.
+
+WHY THIS PROJECT MATTERS:
+
+Indian roads are among the most dangerous in the world. The traffic here is not
+like Western countries. Indian roads have a mix of cars, motorcycles, buses,
+trucks, pedestrians, and bicycles all moving together in unpredictable ways.
+There are no strict lane disciplines. Vehicles make sudden lateral movements,
+motorcycles squeeze through gaps, and pedestrians cross unpredictably.
+
+Existing collision avoidance systems in the market are designed for structured
+Western traffic with proper lanes. They simply fail on Indian roads because they
+cannot handle this kind of chaotic mixed traffic.
+
+OUR SOLUTION:
+
+We built a software-only simulation prototype that takes any traffic video (as a
+stand-in for dashcam footage), processes it frame-by-frame through a complete AI
+pipeline, and produces real-time threat assessments with directional alerts.
+
+The system tells the driver:
+  - WHAT is the threat (car, motorcycle, pedestrian, etc.)
+  - WHERE is it coming from (LEFT, AHEAD, or RIGHT)
+  - HOW DANGEROUS it is (SAFE, LOW, MEDIUM, HIGH, CRITICAL risk)
+  - HOW SOON a collision could happen (Time-To-Collision estimate)
+  - WHAT the driver should do (monitor, prepare, urgent action, immediate action)
+
+This is developed for the Smart India Hackathon (SIH) as a proof-of-concept
+demonstrating how AI can be used to make Indian roads safer.
+
+
+SLIDE 2: DATASET IMPORTING AND DATA MANAGEMENT
+--------------------------------------------------------------------------------
+
+Before any AI model can work, we need data. Our system has a complete dataset
+management pipeline that handles video data in a structured way.
+
+DATASET STRUCTURE:
+
+The system organizes traffic videos into three categories:
+
+  1. POSITIVE videos - These contain actual dangerous situations: near-misses,
+     collision scenarios, aggressive lane cuts, close encounters. These are the
+     videos where our system SHOULD generate alerts.
+
+  2. NEGATIVE videos - These contain normal traffic with no dangerous situations.
+     These are videos where our system should NOT generate false alarms.
+
+  3. INDIAN TRAFFIC videos - Videos specifically from Indian road conditions,
+     sourced from datasets like IDD (Indian Driving Dataset), I2WDD (Indian
+     Traffic Video Dataset for Object Detection), and others.
+
+HOW DATASET IMPORTING WORKS:
+
+The DatasetManager class (located at src/dataset/dataset_manager.py) handles all
+data operations:
+
+  - DISCOVERY: It recursively scans the dataset/ directory and finds all video
+    files in supported formats (MP4, AVI, MOV, MKV, WebM). It checks every
+    subdirectory under dataset/positive/, dataset/negative/, and
+    dataset/indian_traffic/.
+
+  - VALIDATION: For each video found, it opens the file using OpenCV
+    (cv2.VideoCapture) and reads its metadata:
+      * Resolution (width x height)
+      * Frames Per Second (FPS)
+      * Total frame count
+      * Duration in seconds
+    A video is marked valid only if it has at least 10 frames, FPS >= 1.0,
+    and proper dimensions. Invalid videos are filtered out.
+
+  - METADATA EXTRACTION: Each valid video gets a VideoMetadata object
+    containing file path, category, resolution, FPS, duration, and validity
+    status. This metadata drives the entire downstream pipeline.
+
+  - RANDOM SELECTION: The select_random() method picks random videos from
+    the dataset for testing. You can filter by category (positive, negative,
+    or both), set a random seed for reproducibility, and control how many
+    videos to select.
+
+  - BALANCED SELECTION: The select_balanced() method creates a balanced mix
+    of positive and negative videos for fair evaluation.
+
+DATASET TESTING:
+
+The DatasetTestRunner class (src/dataset/dataset_runner.py) processes multiple
+videos in batch. For each video it tracks:
+  - Frames processed, detection events, unique tracked objects
+  - Maximum and average risk scores observed
+  - Whether alerts were generated (HIGH or CRITICAL warnings)
+  - False positives (alerts on negative videos)
+  - False negatives (no alerts on positive videos)
+  - Minimum Time-To-Collision observed
+  - Processing time and FPS
+
+All results are saved as CSV reports for analysis. This allows us to measure
+how well the system performs across many different traffic scenarios.
+
+
+SLIDE 3: OBJECT DETECTION - HOW THE AI SEES THE ROAD
+--------------------------------------------------------------------------------
+
+The first active step in our pipeline is Object Detection. This is where the
+AI actually looks at each video frame and identifies every road user.
+
+THE MODEL: YOLO v11 (You Only Look Once)
+
+We use the YOLO (You Only Look Once) object detection model, specifically the
+YOLOv11 nano variant (yolo11n.pt). YOLO is one of the most popular real-time
+object detection algorithms in computer vision.
+
+HOW YOLO WORKS (SIMPLE EXPLANATION):
+
+  1. The video frame (a grid of pixels) is fed into a deep neural network.
+
+  2. The network divides the frame into a grid of cells.
+
+  3. For each cell, the network predicts:
+     - Is there an object here?
+     - What class is it? (car, motorcycle, person, etc.)
+     - How confident am I? (a score from 0 to 1)
+     - Where exactly is the bounding box? (x1, y1, x2, y2 coordinates)
+
+  4. All predictions are collected and filtered using Non-Maximum Suppression
+     (NMS) to remove duplicate detections.
+
+  5. Only detections above the confidence threshold (default 0.45, tunable)
+     are kept.
+
+CLASSES WE DETECT:
+
+Our system is configured to detect 6 classes relevant to Indian traffic:
+  - car
+  - motorcycle
+  - bus
+  - truck
+  - person (pedestrian)
+  - bicycle
+
+These are the most common road user types on Indian roads. Bicycles and
+motorcycles are particularly important because they are vulnerable road users
+who are most at risk in collisions.
+
+WHAT HAPPENS UNDER THE CODE:
+
+In src/tracking/object_tracker.py, the ObjectTracker class:
+  1. Loads the YOLO model: self.model = YOLO("yolo11n.pt")
+  2. For each frame, calls: self.model.track(frame, persist=True, conf=0.45,
+     tracker="bytetrack.yaml")
+  3. The track() method does detection AND tracking in one call
+  4. Results come back as bounding boxes with class IDs, confidence scores,
+     and persistent track IDs
+  5. We filter results to keep only our 6 target classes
+  6. Each detection becomes a TrackedObject with track_id, class_name, bbox,
+     center point, and confidence
+
+The YOLO model is pre-trained on the COCO dataset (Common Objects in Context)
+which contains 80 object categories. We only use the 6 categories relevant
+to road traffic.
+
+
+SLIDE 4: MULTI-OBJECT TRACKING AND MOTION ANALYSIS
+--------------------------------------------------------------------------------
+
+Detection alone is not enough. We need to TRACK objects across frames to
+understand their movement patterns. This is where Multi-Object Tracking and
+Motion Analysis come in.
+
+BYTETRACK - MULTI-OBJECT TRACKING:
+
+ByteTrack is a state-of-the-art multi-object tracker. Here is how it works:
+
+  1. In each frame, YOLO detects objects and produces bounding boxes.
+
+  2. ByteTrack assigns a UNIQUE ID to each detected object. This ID stays
+     consistent across frames - so if motorcycle #5 is detected in frame 1,
+     the same motorcycle is still #5 in frame 100.
+
+  3. ByteTrack uses a two-stage association strategy:
+     - First, it matches high-confidence detections to existing tracks using
+       IoU (Intersection over Union) matching.
+     - Then, it matches low-confidence detections to remaining tracks, which
+       helps track objects that are partially occluded.
+
+  4. Each track has a lifespan: if an object disappears for more than 60
+     frames without being re-detected, its track is removed (stale cleanup).
+
+WHAT TRACKING GIVES US:
+
+Each TrackedObject stores:
+  - track_id: Unique identifier that persists across frames
+  - class_name: What type of object (car, motorcycle, etc.)
+  - bbox: Bounding box coordinates (x1, y1, x2, y2)
+  - center: Center point of the bounding box ((x1+x2)/2, (y1+y2)/2)
+  - width, height: Size of the bounding box
+  - confidence: Detection confidence score
+  - frame_idx: Which frame this detection is from
+
+MOTION ANALYSIS:
+
+The MotionAnalyzer class (src/motion/motion_analysis.py) takes the tracked
+positions and computes motion characteristics for each object:
+
+  1. POSITION HISTORY: Stores the last 15 positions of each object.
+
+  2. VELOCITY COMPUTATION: Calculates velocity vector from frame-to-frame
+     position changes. Velocity = (delta_x / dt, delta_y / dt) where dt is
+     the time between frames (1/FPS).
+
+  3. HEADING: The direction of movement in degrees (0 = right, 90 = down
+     in image coordinates).
+
+  4. APPROACHING vs RECEDING: Compares the distance from the object to the
+     ego vehicle center between consecutive frames. If the distance is
+     decreasing, the object is APPROACHING. If increasing, it is RECEDING.
+
+  5. MOTION STATE CLASSIFICATION:
+     - APPROACHING: Object moving toward the ego vehicle (bounding box
+       growing, closing distance)
+     - RECEDING: Object moving away from ego (bounding box shrinking,
+       opening distance)
+     - MOVING LATERALLY: Horizontal movement dominates over vertical
+       (lateral_ratio > 1.5)
+     - STATIONARY: Very low movement over recent frames (displacement
+       < 5 pixels)
+
+  6. SMOOTHED SPEED: Uses a moving average window (last 5 frames) to
+     produce stable speed readings that are not jittery.
+
+  7. BOUNDING BOX AREA TREND: Tracks whether the bounding box is growing
+       (object getting closer) or shrinking (object moving away). This is
+       a key signal for approaching/receding classification.
+
+
+SLIDE 5: TRAJECTORY GENERATION AND FUTURE PREDICTION
+--------------------------------------------------------------------------------
+
+This is one of the most important parts of our system - predicting WHERE objects
+WILL BE in the future, not just where they ARE now.
+
+TRAJECTORY GENERATION:
+
+The TrajectoryGenerator class (src/motion/trajectory.py) builds a trajectory
+for each tracked object:
+
+  1. Every frame, the center position of each tracked object is added to its
+     trajectory along with a timestamp.
+
+  2. A Trajectory object stores up to 200 position points with timestamps.
+
+  3. The velocity vector is computed as the average of all frame-to-frame
+     velocity vectors. This gives a more stable estimate than just using the
+     last frame.
+
+  4. Trajectory smoothing uses a moving average kernel (window size 3) to
+     reduce noise in the position data.
+
+FUTURE POSITION PREDICTION:
+
+The FuturePositionPredictor class (src/prediction/future_position.py) predicts
+where each object will be at three future time horizons:
+  - 0.5 seconds ahead
+  - 1.0 seconds ahead
+  - 2.0 seconds ahead
+
+HOW PREDICTION WORKS:
+
+  1. The predictor takes the average velocity vector from the trajectory.
+
+  2. For each horizon, it computes:
+     predicted_x = current_x + velocity_x * horizon
+     predicted_y = current_y + velocity_y * horizon
+
+  3. This is a Constant Velocity Model - it assumes the object will continue
+     moving in the same direction at the same speed.
+
+  4. A confidence score is computed based on trajectory quality:
+     - Less than 3 points: confidence = 0.3
+     - Less than 10 points: confidence = 0.6
+     - Less than 30 points: confidence = 0.8
+     - 30+ points: confidence = 0.95
+     Confidence decays by 0.15 per second of prediction horizon.
+
+TRAJECTORY STATUS CLASSIFICATION:
+
+The system classifies each trajectory into one of four statuses:
+
+  1. MOVING AWAY: Object is receding from the ego path (vy < -10 and
+     horizontal movement is small). No collision risk.
+
+  2. STABLE PATH: Object is on a steady trajectory that does not converge
+     toward the ego path.
+
+  3. CONVERGING: Object is moving toward the ego path center. The predicted
+     lateral distance is less than current lateral distance. This gets extra
+     attention.
+
+  4. POTENTIAL CROSSING: Object's predicted path CROSSES the ego zone
+     boundaries. For example, a motorcycle on the left is predicted to move
+     to the right side of the frame, crossing through the ego vehicle's path.
+     This is the most dangerous trajectory status.
+
+The ego zone is defined as the center 40% of the frame width (from 30% to 70%),
+simulating the path where the ego vehicle would travel.
+
+
+SLIDE 6: COLLISION DETECTION, TTC, RISK SCORING, AND DIRECTIONAL ALERTS
+--------------------------------------------------------------------------------
+
+This is the core decision-making layer of the system. It takes all the
+information from previous stages and decides HOW DANGEROUS each object is.
+
+COLLISION ENGINE (src/collision/collision_engine.py):
+
+The CollisionEngine performs multi-factor collision threat assessment:
+
+STEP 1 - PROXIMITY CHECK:
+  Calculates the Euclidean distance from each object's center to the ego
+  vehicle center (bottom-center of frame). Closer objects get higher risk.
+
+STEP 2 - EGO ZONE CHECK:
+  Checks if the object is within the ego path (between 30% and 70% of frame
+  width). Objects in the ego zone are more dangerous.
+
+STEP 3 - TTC ESTIMATION (Time-To-Collision):
+  TTC = current_distance / closing_speed
+
+  Where closing_speed is computed from the visual closing rate:
+  - Measures how quickly the distance to ego center changes over recent frames
+  - Closing speed = |distance_change| / time_span
+  - TTC is then: current_distance / closing_speed
+
+  TTC is adjusted:
+  - Reduced by 20% if object is in the ego zone
+  - Reduced by 10% if bounding box is growing rapidly
+  - Clamped to range [0.3, 10.0] seconds
+
+STEP 4 - PET ESTIMATION (Post Encroachment Time):
+  PET estimates the temporal gap between when the object and the ego vehicle
+  would occupy the same space. It is calculated as the time for the object to
+  reach the ego zone center, adjusted by trajectory status.
+
+STEP 5 - CONFLICT STATUS:
+  A scoring system combines multiple factors:
+  - TTC score: < 1.5s = +40, < 3.0s = +25, < 5.0s = +10
+  - Ego zone presence: +20
+  - Proximity: < 100px = +15, < 200px = +8
+  - Motion state: APPROACHING = +15, RECEDING = -10
+  - Trajectory status: CROSSING = +20, CONVERGING = +15, AWAY = -15
+  - Vulnerable road users (person, bicycle, motorcycle): +5 if approaching
+
+  Score >= 60: HIGH CONFLICT
+  Score >= 35: POTENTIAL CONFLICT
+  Score >= 15: MONITOR
+  Score < 15: NO SIGNIFICANT CONFLICT
+
+STEP 6 - DRAC RISK (Deceleration Rate to Avoid Collision):
+  Categorizes the deceleration urgency needed:
+  CRITICAL / HIGH / MEDIUM / LOW based on TTC, conflict status, motion, and
+  proximity.
+
+STEP 7 - ACT (Action Urgency Window):
+  Based on TTC and conflict level:
+  - TTC < 1.5s: IMMEDIATE action needed
+  - TTC < 3.0s: URGENT action needed
+  - TTC < 5.0s: PREPARE for action
+  - High conflict but no valid TTC: MONITOR
+  - Otherwise: N/A
+
+RISK ENGINE (src/risk/risk_engine.py):
+
+The RiskEngine produces a final risk score (0-100) by combining 7 weighted factors:
+
+  Factor              Weight    Score Mapping
+  --------            ------    -------------
+  Motion State        0.15      APPROACHING=75, LATERAL=40, RECEDING=20, STATIONARY=10
+  Direction           0.10      AHEAD=70, LEFT=45, RIGHT=45
+  Proximity           0.20      < 100px=90, < 150px=70, < 250px=45, < 400px=25
+  Conflict Status     0.20      HIGH=90, POTENTIAL=60, MONITOR=30, NONE=5
+  TTC                 0.20      < 1.5s=95, < 3.0s=70, < 5.0s=40
+  PET                 0.10      < 1.0s=90, < 2.0s=65, < 3.0s=35
+  Trajectory          0.05      CROSSING=85, CONVERGING=65, STABLE=30, AWAY=5
+
+  risk_score = sum(factor_score * weight) for all factors
+
+SMART GATING (False Alarm Prevention):
+  - If NO conflict is detected: risk_score is capped at 35 to prevent false alarms
+  - If conflict exists but object is NOT confirmed approaching with valid TTC:
+    risk_score is capped at 55
+  - This prevents normal traffic from generating spurious warnings
+
+RISK LEVELS:
+  0-20:   SAFE (green)
+  21-40:  LOW (green)
+  41-60:  MEDIUM (yellow/orange)
+  61-80:  HIGH (orange/red)
+  81-100: CRITICAL (red)
+
+DIRECTIONAL REASONING (src/direction/directional_reasoning.py):
+
+Determines LEFT / AHEAD / RIGHT for each object:
+  1. Computes angle from ego center to threat center using arctan2
+  2. Normalizes angle to [-180, 180] degrees
+  3. If angle < -30 degrees: LEFT
+  4. If angle > 30 degrees: RIGHT
+  5. Otherwise: AHEAD
+
+PRIMARY THREAT IDENTIFICATION:
+  The object with the highest risk score across all tracked objects is
+  selected as the PRIMARY THREAT. This is the one the driver needs to
+  worry about most.
+
+DRIVER RESPONSE AND INACTION GATE:
+
+The InactionGate (src/driver_response/inaction_gate.py) implements smart
+alert suppression:
+
+  - HIGH RISK + DRIVER NOT RESPONDING = GENERATE ALERT
+  - HIGH RISK + DRIVER ALREADY RESPONDING = SUPPRESS ALERT
+
+This prevents redundant alerts. If the driver is already braking or steering,
+the system does not keep beeping at them. It also has a cooldown timer
+(default 1.5 seconds) to avoid rapid repeated alerts.
+
+AUDIO ALERTS:
+  - CRITICAL risk: 1000 Hz beep for 500ms
+  - HIGH risk: 800 Hz beep for 300ms
+  - MEDIUM and below: No audio alert
+
+
+SLIDE 7: DASHBOARD, OUTPUT, AND COMPLETE PIPELINE SUMMARY
+--------------------------------------------------------------------------------
+
+The final piece is the interactive dashboard and the complete processing output.
+
+REACT WEB DASHBOARD:
+
+The system uses a React + TypeScript + Vite + Tailwind web application served by a FastAPI backend.
+
+The dashboard provides:
+
+  1. INPUT MODE SELECTION (Sidebar):
+     - Upload Video: Upload your own traffic video (MP4, AVI, MOV, MKV)
+     - Random Dataset Video: Pick a random video from the dataset
+     - Automated Dataset Test: Run batch evaluation on multiple videos
+
+  2. DETECTION SETTINGS:
+     - Confidence threshold slider (0.1 to 1.0, default 0.5)
+     - Controls how strict the YOLO detector is
+
+  3. SIMULATED ROAD CAMERA VIEW:
+     - Shows the processed video with all annotations overlaid:
+       * Bounding boxes around detected objects (color-coded by risk level)
+       * Object labels with class name and track ID
+       * Direction and motion state labels
+       * Risk score and level for each object
+       * Trajectory lines showing past movement paths
+       * Future position prediction markers (yellow dots)
+       * Direction zone overlays (LEFT / AHEAD / RIGHT regions)
+       * Primary threat banner at the bottom for HIGH/CRITICAL risks
+
+  4. CURRENT THREAT PANEL:
+     - Shows the primary threat details: object type, direction, motion,
+       estimated TTC, risk score, and risk level
+
+  5. ACTIVE DRIVER ALERT:
+     - Prominent warning display when HIGH or CRITICAL risk is detected
+     - Shows which object, from which direction, with predicted collision time
+
+  6. SYSTEM DETAILS (Expandable):
+     - Processing FPS, total objects detected, current frame
+     - Safety metrics: TTC, PET, DRAC Risk, ACT
+     - Pipeline status showing all stages
+
+  7. OBJECT STATISTICS:
+     - Total detection events, unique tracked objects, processing speed
+     - Breakdown by object class (how many cars, motorcycles, pedestrians, etc.)
+
+  8. DOWNLOAD RESULTS:
+     - Download the annotated output video (MP4)
+     - Download the analysis report as CSV (contains per-object risk data,
+       TTC estimates, conflict status, direction, motion state, etc.)
+
+COMPLETE PIPELINE FLOW:
+
+Here is the complete data flow from input to output, step by step:
+
+  FRAME INPUT (Video Frame)
+       |
+       v
+  [1] YOLO OBJECT DETECTION
+       - Neural network analyzes the frame
+       - Detects bounding boxes, classes, confidence scores
+       - Filters to 6 target classes
+       |
+       v
+  [2] BYTETRACK MULTI-OBJECT TRACKING
+       - Assigns persistent IDs to detected objects
+       - Maintains identity across frames
+       - Handles occlusions and re-detections
+       |
+       v
+  [3] MOTION ANALYSIS
+       - Computes velocity, speed, heading for each track
+       - Classifies motion: APPROACHING / RECEDING / LATERAL / STATIONARY
+       - Tracks bounding box area growth/shrink
+       |
+       v
+  [4] TRAJECTORY GENERATION
+       - Builds position history for each track
+       - Computes average velocity vector
+       - Smooths noisy position data
+       |
+       v
+  [5] FUTURE POSITION PREDICTION
+       - Predicts positions at 0.5s, 1.0s, 2.0s horizons
+       - Uses constant velocity extrapolation
+       - Classifies trajectory: MOVING AWAY / STABLE / CONVERGING / CROSSING
+       |
+       v
+  [6] DIRECTIONAL REASONING
+       - Determines LEFT / AHEAD / RIGHT for each object
+       - Uses angular position relative to ego center
+       |
+       v
+  [7] COLLISION ASSESSMENT
+       - Estimates Time-To-Collision (TTC)
+       - Estimates Post Encroachment Time (PET)
+       - Estimates DRAC risk category
+       - Estimates action urgency (ACT)
+       - Determines conflict status
+       |
+       v
+  [8] RISK SCORING
+       - Combines 7 weighted factors into 0-100 score
+       - Applies smart gating to prevent false alarms
+       - Assigns risk level: SAFE / LOW / MEDIUM / HIGH / CRITICAL
+       |
+       v
+  [9] PRIMARY THREAT IDENTIFICATION
+       - Selects the highest-risk object
+       - Prepares directional alert information
+       |
+       v
+  [10] INACTION GATE
+       - Checks if driver is already responding
+       - Suppresses redundant alerts
+       - Applies cooldown between alerts
+       |
+       v
+  [11] ALERT GENERATION
+       - Audio beep for HIGH/CRITICAL threats
+       - Visual alert on dashboard
+       - Annotated video output with all overlays
+       |
+       v
+  [12] DASHBOARD OUTPUT
+       - Processed video with annotations
+       - Real-time metrics and statistics
+       - CSV analysis reports for download
+
+TECHNOLOGY STACK:
+  - Python: Core programming language
+  - OpenCV: Video processing and frame manipulation
+  - Ultralytics YOLO (v11): Object detection neural network
+  - ByteTrack: Multi-object tracking algorithm
+  - NumPy: Numerical computations (velocity, distance, angle calculations)
+  - Pandas: Data handling and CSV report generation
+  - FastAPI: HTTP/WebSocket API serving the React frontend
+  - React + Vite + Tailwind: Interactive web dashboard
+
+KEY FILES IN THE PROJECT:
+  - api/main.py: FastAPI integration layer (HTTP + WebSocket)
+  - frontend/: React + TypeScript + Vite + Tailwind UI
+  - src/pipeline/processor.py: AI pipeline orchestration (no UI deps)
+  - config/settings.py: All tunable parameters and thresholds
+  - config/thresholds.py: Risk scoring thresholds and severity levels
+  - config/dataset_config.py: Dataset paths and validation rules
+  - src/detection/object_detector.py: YOLO model wrapper
+  - src/tracking/object_tracker.py: ByteTrack integration and TrackedObject class
+  - src/motion/motion_analysis.py: Velocity, heading, motion classification
+  - src/motion/trajectory.py: Trajectory building and smoothing
+  - src/prediction/future_position.py: Future position extrapolation
+  - src/direction/directional_reasoning.py: LEFT/AHEAD/RIGHT classification
+  - src/collision/collision_engine.py: TTC, PET, DRAC, conflict detection
+  - src/risk/risk_engine.py: Risk score computation and primary threat
+  - src/driver_response/inaction_gate.py: Smart alert suppression
+  - src/driver_response/driver_simulator.py: Simulated driver behavior
+  - src/dataset/dataset_manager.py: Video discovery and validation
+  - src/dataset/dataset_runner.py: Batch evaluation pipeline
+  - src/alerts/audio_alert.py: Platform-specific audio warnings
+
+CURRENT PROTOTYPE STATUS:
+  This is a SOFTWARE-ONLY SIMULATION PROTOTYPE. We use recorded traffic videos
+  as simulated dashcam input. The following are NOT included:
+  - Real dashcam hardware
+  - CAN bus vehicle data
+  - GPS/IMU sensor data
+  - Automatic braking or steering actuators
+  - Real-time sensor fusion
+
+  The architecture is designed for future hardware deployment with real cameras,
+  edge computing (NVIDIA Jetson), V2X communication, and ADAS actuators.
+
+================================================================================
+                         END OF PRESENTATION EXPLANATION
+================================================================================

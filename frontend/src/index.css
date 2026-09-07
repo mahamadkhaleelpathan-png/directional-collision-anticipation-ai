@@ -1,0 +1,306 @@
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #0B0F19;
+  color: #E2E8F0;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .hud-panel {
+    @apply rounded-hud border border-hud-border bg-hud-panel/80 backdrop-blur-md shadow-hud;
+  }
+
+  .hud-panel-hover {
+    @apply hover:shadow-hudHover transition-all hover:border-hud-cyan/40;
+  }
+
+  .hud-label {
+    @apply text-[10px] font-semibold uppercase tracking-[0.25em] text-hud-dim;
+  }
+
+  .hud-title {
+    @apply font-hud text-hud-text font-semibold;
+  }
+
+  .btn-hud {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-hud-cyan/30 bg-hud-cyan/10 px-4 py-2 text-sm font-semibold text-hud-cyan transition hover:bg-hud-cyan/20 hover:shadow-glowCyan disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-hud-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-hud-border bg-hud-panel px-4 py-2 text-sm font-medium text-hud-text transition hover:border-hud-cyan/40 hover:text-hud-cyan disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .risk-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold uppercase tracking-wider;
+  }
+}
+
+/* Range slider styling for HUD */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  background: #1E293B;
+  outline: none;
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #22D3EE;
+  border: 2px solid #0B0F19;
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.6);
+  cursor: pointer;
+}
+
+/* ===== HUD animations (all gated by prefers-reduced-motion) ===== */
+
+@keyframes hud-scan {
+  0% {
+    transform: translateY(-120%);
+    opacity: 0;
+  }
+  8% {
+    opacity: 0.9;
+  }
+  92% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(4800%);
+    opacity: 0;
+  }
+}
+
+@keyframes hud-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes hud-dash {
+  to {
+    stroke-dashoffset: -36;
+  }
+}
+
+@keyframes hud-arrow-l {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateX(-7px);
+    opacity: 1;
+  }
+}
+
+@keyframes hud-arrow-r {
+  0%,
+  100% {
+    transform: translateX(0);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateX(7px);
+    opacity: 1;
+  }
+}
+
+@keyframes hud-arrow-u {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(-7px);
+    opacity: 1;
+  }
+}
+
+@keyframes hud-zone {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes hud-screenpulse {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 rgba(248, 113, 113, 0);
+  }
+  50% {
+    box-shadow: inset 0 0 90px 6px rgba(248, 113, 113, 0.55);
+  }
+}
+
+@keyframes hud-cornerbracket {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.9);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.15);
+  }
+}
+
+@keyframes hud-filmspan {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes hud-frameFlash {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  25% {
+    opacity: 1;
+    transform: scale(1.18);
+    text-shadow: 0 0 10px rgba(34, 211, 238, 0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    text-shadow: 0 0 0 rgba(34, 211, 238, 0);
+  }
+}
+
+:root {
+  --hud-anim-fast: 0.9s;
+  --hud-anim-slow: 2.2s;
+}
+
+.hud-anim-scanline {
+  animation: hud-scan var(--hud-anim-slow) linear infinite;
+}
+
+.hud-anim-scanline-soft {
+  animation: hud-scan 3.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.hud-anim-frameFlash {
+  animation: hud-frameFlash 0.35s ease-out;
+}
+
+.hud-anim-filmspan {
+  animation: hud-filmspan 2.2s steps(6, end) infinite;
+}
+
+.hud-anim-blink {
+  animation: hud-blink 1.6s ease-in-out infinite;
+}
+
+.hud-anim-dash {
+  animation: hud-dash 1.1s linear infinite;
+}
+
+.hud-anim-arrow-l {
+  animation: hud-arrow-l var(--hud-anim-fast) ease-in-out infinite;
+}
+
+.hud-anim-arrow-r {
+  animation: hud-arrow-r var(--hud-anim-fast) ease-in-out infinite;
+}
+
+.hud-anim-arrow-u {
+  animation: hud-arrow-u var(--hud-anim-fast) ease-in-out infinite;
+}
+
+.hud-anim-zone {
+  animation: hud-zone 1.3s ease-in-out infinite;
+}
+
+.hud-anim-screenpulse {
+  animation: hud-screenpulse 0.8s ease-in-out infinite;
+}
+
+.hud-anim-bracket {
+  animation: hud-cornerbracket 2s ease-in-out infinite;
+}
+
+/* Part 4: voice assistant waveform */
+@keyframes hud-voicebar {
+  0%,
+  100% {
+    height: 18%;
+  }
+  50% {
+    height: 100%;
+  }
+}
+
+.hud-anim-voice {
+  border-color: rgba(52, 211, 153, 0.45) !important;
+}
+
+.hud-anim-voice .voice-bar {
+  animation: hud-voicebar 0.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-anim-scanline,
+  .hud-anim-scanline-soft,
+  .hud-anim-blink,
+  .hud-anim-dash,
+  .hud-anim-arrow-l,
+  .hud-anim-arrow-r,
+  .hud-anim-arrow-u,
+  .hud-anim-zone,
+  .hud-anim-screenpulse,
+  .hud-anim-bracket,
+  .hud-anim-frameFlash,
+  .hud-anim-filmspan {
+    animation: none;
+  }
+  .hud-anim-voice .voice-bar {
+    animation: none;
+  }
+}

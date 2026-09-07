@@ -1,0 +1,1 @@
+"""FastAPI integration package exposing the AI backend to the web frontend."""

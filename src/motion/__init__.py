@@ -1,0 +1,3 @@
+"""
+Motion analysis package.
+"""
