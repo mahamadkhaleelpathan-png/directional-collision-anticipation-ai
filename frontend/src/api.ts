@@ -8,8 +8,7 @@ import type {
   VoiceAlert,
   VoiceQueryResponse,
 } from './types';
-
-const API_BASE = '/api';
+import { API_BASE, wsUrl } from './config';
 
 async function jsonFetch<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
@@ -236,8 +235,7 @@ export const api = {
     /** Part 4: called for every backend-generated `voice_alert` message. */
     onVoiceAlert?: (alert: VoiceAlert) => void;
   }): WebSocket {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/jobs/${jobId}`);
+    const ws = new WebSocket(wsUrl(`/ws/jobs/${jobId}`));
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);

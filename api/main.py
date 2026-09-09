@@ -55,9 +55,15 @@ _ensure_dataset_dirs()
 
 app = FastAPI(title="AI Collision Anticipation API")
 
+# CORS: production origins come from CORS_ALLOW_ORIGINS (comma-separated exact
+# origins). When unset, only local dev origins are allowed - never "*".
+_CORS_ORIGINS = (
+    [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+    or ["http://localhost:5173", "http://127.0.0.1:5173"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

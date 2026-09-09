@@ -12,6 +12,7 @@ import { TrafficMiniMap } from './components/TrafficMiniMap';
 import { EventLog } from './components/EventLog';
 import { VoiceAssistantHud } from './components/VoiceAssistantHud';
 import { api } from './api';
+import { API_BASE } from './config';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getVerdict } from './utils/verdict';
 import { voiceEngine } from './voice/voiceEngine';
@@ -160,7 +161,7 @@ export default function App() {
     let alive = true;
     const check = async () => {
       try {
-        const res = await fetch('/api/health');
+        const res = await fetch(`${API_BASE}/health`);
         if (alive) setApiUp(res.ok);
       } catch {
         if (alive) setApiUp(false);

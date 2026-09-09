@@ -67,3 +67,8 @@ temp/
 .pytest_cache/
 .server_pid_backend
 .server_pid_frontend
+
+# Vercel local project link
+.vercel/
+
+tsconfig*.tsbuildinfo
