@@ -30,17 +30,17 @@ function Start-Neighbor {
 $backendPid = "$root\.server_pid_backend"
 $frontendPid = "$root\.server_pid_frontend"
 
-$Start-Backend = {
+$StartBackend = {
     $p = Start-Process -FilePath "$root\venv\Scripts\python.exe" -ArgumentList "-m","uvicorn","api.main:app","--host","127.0.0.1","--port","8000" -WorkingDirectory $root -WindowStyle Hidden -PassThru
     $p
 }
-$Start-Frontend = {
+$StartFrontend = {
     $p = Start-Process -FilePath "$nodeBin\npm.cmd" -ArgumentList "run","dev" -WorkingDirectory "$root\frontend" -WindowStyle Hidden -PassThru
     $p
 }
 
-Start-Neighbor "backend" $backendPid $Start-Backend
-Start-Neighbor "frontend" $frontendPid $Start-Frontend
+Start-Neighbor "backend" $backendPid $StartBackend
+Start-Neighbor "frontend" $frontendPid $StartFrontend
 
 Start-Sleep -Seconds 12
 "backend health: " + (curl.exe -s -o NUL -w "%{http_code}" --max-time 10 "http://127.0.0.1:8000/api/health")
