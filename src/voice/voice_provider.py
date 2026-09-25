@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 # Real Microsoft Edge neural voices for the supported Indian locales
 # (item 35: true per-locale voices, with a safe fallback to the configured
-# voice for locales where no Edge voice is published yet).
+# voice for locales where no Edge voice is published yet, e.g. Odia).
 _INDIAN_VOICE_MAP = {
     "en-in": "en-IN-PrabhatNeural",
     "hi-in": "hi-IN-MadhurNeural",
@@ -34,6 +34,8 @@ _INDIAN_VOICE_MAP = {
     "mr-in": "mr-IN-ManoharNeural",
     "gu-in": "gu-IN-NiranjanNeural",
     "bn-in": "bn-IN-BashkarNeural",
+    "pa-in": "pa-IN-AbhishekNeural",
+    "ur-in": "ur-IN-SalmanNeural",
 }
 
 

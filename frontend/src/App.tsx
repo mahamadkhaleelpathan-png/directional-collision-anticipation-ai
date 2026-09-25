@@ -20,15 +20,9 @@ import { VOICE_PRIORITIES } from './voice/voiceEngine';
 import { DEFAULT_VOICE_LANGUAGE, isSupportedLanguage } from './voice/languages';
 import type { JobSnapshot, VoiceAlert, VoiceAssistantState } from './types';
 
-/** Honest one-line voice status for the HUD (Phase 6/7 status panel). */
-function voiceEngineStatusText(): string {
-  const info = voiceEngine.getVoiceInfo();
-  if (!info.available) return 'Web Speech API unavailable';
-  if (info.voicesCount === 0) return 'no voices found — restart browser';
-  if (!info.activeVoiceName) return `${info.requestedLanguage} (default voice)`;
-  const fallback = info.isFallback ? ' fallback' : '';
-  return `${info.activeLanguage} · ${info.activeVoiceName}${fallback}`;
-}
+/** Voice persistence key (Phase 16). Legacy 'voice.language' still read once. */
+const VOICE_STORAGE_KEY = 'voiceLanguage';
+const VOICE_STORAGE_LEGACY = 'voice.language';
 
 interface SelectedVideo {
   file_path: string;
@@ -65,7 +59,8 @@ export default function App() {
 
   const [voiceLanguage, setVoiceLanguageState] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem('voice.language');
+      const saved =
+        localStorage.getItem(VOICE_STORAGE_KEY) ?? localStorage.getItem(VOICE_STORAGE_LEGACY);
       if (saved && isSupportedLanguage(saved)) {
         voiceEngine.setLanguage(saved);
         return saved;
@@ -80,7 +75,8 @@ export default function App() {
     setVoiceLanguageState(lang);
     voiceEngine.setLanguage(lang);
     try {
-      localStorage.setItem('voice.language', lang);
+      localStorage.setItem(VOICE_STORAGE_KEY, lang);
+      localStorage.setItem(VOICE_STORAGE_LEGACY, lang);
     } catch {
       // ignore storage errors
     }
@@ -221,6 +217,14 @@ export default function App() {
       const newJob = await api.startProcessing(selectedVideo.file_path, confidence);
       setJob(newJob);
       setVoiceAlertCount(0);
+      // Re-assert the user's persisted language so the backend builds every
+      // alert in the SELECTED locale (the backend otherwise starts with its
+      // own default until it has heard from the HUD).
+      if (isSupportedLanguage(voiceLanguage)) {
+        api.voiceLanguage(newJob.job_id, voiceLanguage).catch((err) =>
+          console.error('voice language sync failed at job start', err)
+        );
+      }
       openSocket(newJob.job_id);
     } catch (err) {
       console.error(err);
@@ -459,7 +463,7 @@ export default function App() {
                   micAvailable={micAvailable}
                   currentLanguage={voiceLanguage}
                   lastAlert={lastVoiceAlert}
-                  voiceInfo={voiceEngineStatusText()}
+                  diagnostics={voiceEngine.getVoiceDiagnostics()}
                   onToggleEnabled={() => {
                     const next = !voiceEnabled;
                     setVoiceEnabled(next);

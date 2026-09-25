@@ -9,10 +9,13 @@ Design rules:
   the exact wording cannot drift and is unit-testable.
 - Phrase generation is fully local (no LLM / translation service), keeping
   threat-to-speech latency low (REAL-TIME, AUTOMATIC, SIMULTANEOUS).
-- ``te-IN`` (Telugu) is the default language. ``hi-IN`` (Hindi) and the other
-  Indian languages are selectable from the HUD; ``en-IN`` is the safe
-  fallback when a requested code is unknown (never silently fake speech — the
-  caller surfaces ``fallback_language``).
+- ``en-IN`` (English, India) is the default language. ANY of the supported
+  Indian languages (``hi-IN``, ``te-IN``, ``ta-IN``, ```kn-IN``, ...) is
+  selectable from the HUD; the requested locale is always attempted first.
+  ``en-IN`` is the safe fallback only when a REQUESTED code is unknown (never
+  silently fake speech — the caller surfaces ``fallback_language``).
+- Telugu is fully supported but is NEVER the default or the universal
+  fallback: selecting Hindi speaks Hindi, selecting Tamil speaks Tamil, etc.
 """
 
 from __future__ import annotations
@@ -27,9 +30,26 @@ LANGUAGE_CODES: Tuple[str, ...] = (
 )
 
 # Default language (item 21 / HUD "Current Language" default).
-DEFAULT_LANGUAGE: str = "te-IN"
+DEFAULT_LANGUAGE: str = "en-IN"
 
 _FALLBACK_LANGUAGE: str = "en-IN"
+
+# Human-readable names (English + native) for the central language table
+# (Phase 2: one central config, no scattered language codes).
+LANGUAGE_META: Dict[str, Dict[str, str]] = {
+    "en-IN": {"name": "English", "native_name": "English"},
+    "hi-IN": {"name": "Hindi", "native_name": "हिन्दी"},
+    "te-IN": {"name": "Telugu", "native_name": "తెలుగు"},
+    "ta-IN": {"name": "Tamil", "native_name": "தமிழ்"},
+    "kn-IN": {"name": "Kannada", "native_name": "ಕನ್ನಡ"},
+    "ml-IN": {"name": "Malayalam", "native_name": "മലയാളം"},
+    "mr-IN": {"name": "Marathi", "native_name": "मराठी"},
+    "gu-IN": {"name": "Gujarati", "native_name": "ગુજરાતી"},
+    "bn-IN": {"name": "Bengali", "native_name": "বাংলা"},
+    "pa-IN": {"name": "Punjabi", "native_name": "ਪੰਜਾਬੀ"},
+    "or-IN": {"name": "Odia", "native_name": "ଓଡ଼ିଆ"},
+    "ur-IN": {"name": "Urdu", "native_name": "اردو"},
+}
 
 # Native-name labels shown in the HUD language selector (item 21).
 LANGUAGE_LABELS: Dict[str, str] = {
@@ -434,10 +454,19 @@ def test_text(language: Optional[str]) -> str:
 
 
 def supported_languages() -> List[Dict[str, str]]:
-    """Metadata for every supported language (used by the API/HUD)."""
+    """Metadata for every supported language (used by the API/HUD).
+
+    Additive fields per locale: ``code``/``id`` (locale tag), ``locale``,
+    ``name``, ``native_name``, ``label`` (native + English, for the selector)
+    and ``test`` (the per-language "Test voice" sentence).
+    """
     return [
         {
             "code": code,
+            "id": code,
+            "locale": code,
+            "name": LANGUAGE_META.get(code, {}).get("name", code),
+            "native_name": LANGUAGE_META.get(code, {}).get("native_name", code),
             "label": LANGUAGE_LABELS.get(code, code),
             "test": test_text(code),
         }

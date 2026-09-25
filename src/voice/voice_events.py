@@ -67,11 +67,13 @@ class VoiceEvent:
         """JSON-safe dict delivered over the WebSocket as ``voice_alert``.
 
         Additive aliases: ``message`` (== text), ``vehicle_class``
-        (== class_name) and ``ttc_seconds`` (== ttc). Original keys stay so
-        existing WebSocket clients are never broken.
+        (== class_name), ``ttc_seconds`` (== ttc) and ``locale``
+        (== language). Original keys stay so existing WebSocket clients are
+        never broken.
         """
         d = asdict(self)
         d["message"] = self.text
         d["vehicle_class"] = self.class_name
         d["ttc_seconds"] = self.ttc
+        d["locale"] = self.language
         return d

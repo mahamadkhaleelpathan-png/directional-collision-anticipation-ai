@@ -12,11 +12,8 @@ import {
   Zap,
 } from 'lucide-react';
 import type { VoiceAlert, VoiceAssistantState } from '../types';
-import {
-  VOICE_LANGUAGE_CODES,
-  VOICE_LANGUAGE_LABELS,
-  languageLabel,
-} from '../voice/languages';
+import { VOICE_LANGUAGES, languageLabel, languageSelectorLabel } from '../voice/languages';
+import type { VoiceEngineInfo } from '../voice/voiceEngine';
 
 interface VoiceAssistantHudProps {
   voiceState: VoiceAssistantState;
@@ -30,7 +27,7 @@ interface VoiceAssistantHudProps {
   micAvailable: boolean;
   currentLanguage: string;
   lastAlert: VoiceAlert | null;
-  voiceInfo: string;
+  diagnostics: VoiceEngineInfo;
   onToggleEnabled: () => void;
   onToggleMuted: () => void;
   onVolumeChange: (v: number) => void;
@@ -123,9 +120,9 @@ export function VoiceAssistantHud(props: VoiceAssistantHudProps) {
           className="w-full rounded-lg border border-hud-border bg-hud-panel2 px-3 py-2 font-hud text-xs text-hud-text outline-none focus:border-hud-cyan/50"
           aria-label="Voice assistant language"
         >
-          {VOICE_LANGUAGE_CODES.map((code) => (
-            <option key={code} value={code}>
-              {VOICE_LANGUAGE_LABELS[code]}
+          {VOICE_LANGUAGES.map((lang) => (
+            <option key={lang.id} value={lang.id}>
+              {languageSelectorLabel(lang.id)}
             </option>
           ))}
         </select>
@@ -182,16 +179,48 @@ export function VoiceAssistantHud(props: VoiceAssistantHudProps) {
         </div>
       </div>
 
-      {/* Honest voice status (active vs requested voice) */}
+      {/* Honest voice status (Phase 13/19: provider, locale, supported) */}
       <div className="mb-4 rounded-lg border border-hud-border/60 bg-hud-panel2/60 p-3">
         <div className="mb-1.5 flex items-center gap-1 font-hud text-[10px] tracking-widest text-hud-dim">
           <Volume2 className="h-3 w-3 text-hud-cyan" />
           VOICE STATUS
         </div>
         <div className="space-y-1">
-          <AlertRow label="ENABLED" value={props.enabled ? (props.muted ? 'MUTED' : 'ON') : 'OFF'} />
-          <AlertRow label="ACTIVE VOICE" value={props.voiceInfo || '—'} />
+          <AlertRow
+            label="ENABLED"
+            value={props.enabled ? (props.muted ? 'MUTED' : 'ON') : 'OFF'}
+          />
+          <AlertRow label="LOCALE" value={props.diagnostics.requestedLocale || '—'} />
+          <AlertRow
+            label="SUPPORTED"
+            value={props.diagnostics.supported ? 'Yes' : 'No'}
+          />
+          <AlertRow
+            label="PROVIDER"
+            value={
+              props.diagnostics.available && props.diagnostics.voicesCount > 0
+                ? 'Browser TTS'
+                : props.diagnostics.provider
+            }
+          />
+          <AlertRow
+            label="VOICE"
+            value={
+              props.diagnostics.selectedVoiceName
+                ? `${props.diagnostics.selectedVoiceLocale} · ${props.diagnostics.selectedVoiceName}${
+                    props.diagnostics.fallbackVoiceAvailable ? ' (fallback)' : ''
+                  }`
+                : props.diagnostics.voicesCount === 0
+                  ? 'no voices found'
+                  : 'requested voice unavailable'
+            }
+          />
         </div>
+        {(props.voiceState === 'BLOCKED' || props.voiceState === 'NO_VOICE') && (
+          <p className="mt-2 font-hud text-[10px] leading-relaxed text-hud-amber">
+            Click ENABLE VOICE once to unlock browser audio, then TEST VOICE.
+          </p>
+        )}
       </div>
 
       {/* Controls */}
@@ -203,7 +232,7 @@ export function VoiceAssistantHud(props: VoiceAssistantHudProps) {
           title={props.enabled ? 'Disable the voice assistant' : 'Enable the voice assistant'}
         >
           <Power className="h-4 w-4" />
-          {props.enabled ? 'ON' : 'OFF'}
+          {props.enabled ? 'DISABLE' : 'ENABLE VOICE'}
         </button>
         <button
           type="button"

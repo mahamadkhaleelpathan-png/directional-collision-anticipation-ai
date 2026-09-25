@@ -30,7 +30,7 @@ from src.voice.state_machine import (
 )
 from src.voice.voice_events import PRIORITY_MAP, VoiceEvent
 from src.voice.voice_manager import VoiceAlertManager
-from src.voice.voice_provider import VoiceProvider
+from src.voice.voice_provider import VoiceProvider, _INDIAN_VOICE_MAP
 
 
 class RecorderProvider(VoiceProvider):
@@ -458,15 +458,37 @@ class VoiceWebSocketTests(unittest.TestCase):
                 self.assertIn("vehicle_class", alert)
                 self.assertIn("ttc_seconds", alert)
                 self.assertIn("language", alert)
+                self.assertIn("locale", alert)
+                self.assertEqual(alert["locale"], alert["language"])
                 self.assertIn("speed_valid", alert)
 
 
 class MultilingualVoiceTests(unittest.TestCase):
-    def test_default_language_is_telugu(self):
+    def test_default_language_is_english_not_telugu(self):
         msg = build_voice_message("HIGH", direction="AHEAD", ttc=2.0)
+        self.assertEqual(DEFAULT_LANGUAGE, "en-IN")
+        self.assertNotEqual(DEFAULT_LANGUAGE, "te-IN")
         self.assertEqual(msg["language"], DEFAULT_LANGUAGE)
-        self.assertEqual(msg["language"], "te-IN")
-        self.assertIn("తాకిడి", msg["text"])
+        self.assertIn("High collision risk", msg["text"])
+        self.assertNotIn("తాకిడి", msg["text"])
+
+    def test_telugu_is_not_forced_fallback(self):
+        # Selecting Hindi speaks Hindi; selecting Tamil speaks Tamil; reducing
+        # to the exact requested locale even though Telugu is always available.
+        hi = build_voice_message("HIGH", direction="LEFT", ttc=2.0, language="hi-IN")
+        self.assertEqual(hi["spoken_language"], "hi-IN")
+        self.assertIsNone(hi["fallback_language"])
+        self.assertIn("जोखिम", hi["text"])
+        self.assertNotIn("తాకిడి", hi["text"])
+
+        ta = build_voice_message("HIGH", direction="LEFT", ttc=2.0, language="ta-IN")
+        self.assertEqual(ta["spoken_language"], "ta-IN")
+        self.assertIn("ஆபத்து", ta["text"])
+        self.assertNotIn("తాకిడి", ta["text"])
+
+        te = build_voice_message("HIGH", direction="LEFT", ttc=2.0, language="te-IN")
+        self.assertEqual(te["spoken_language"], "te-IN")
+        self.assertIn("తాకిడి", te["text"])
 
     def test_hindi_message(self):
         msg = build_voice_message("HIGH", direction="LEFT", ttc=2.0, language="hi-IN")
@@ -504,6 +526,36 @@ class MultilingualVoiceTests(unittest.TestCase):
         ):
             self.assertIn(code, codes)
 
+    def test_supported_languages_metadata_complete(self):
+        langs = supported_languages()
+        self.assertEqual(len(langs), 12)
+        meta = {"en-IN", "hi-IN", "te-IN", "ta-IN", "kn-IN", "ml-IN",
+                "mr-IN", "gu-IN", "bn-IN", "pa-IN", "or-IN", "ur-IN"}
+        for lang in langs:
+            self.assertEqual(lang["id"], lang["locale"])
+            self.assertEqual(lang["id"], lang["code"])
+            self.assertTrue(lang["name"])
+            self.assertTrue(lang["native_name"])
+            self.assertTrue(lang["label"])
+            self.assertTrue(lang["test"])
+            meta.discard(lang["code"])
+        self.assertEqual(meta, set())
+
+    def test_meta_english_and_urdu_present(self):
+        by_code = {lang["code"]: lang for lang in supported_languages()}
+        self.assertEqual(by_code["en-IN"]["name"], "English")
+        self.assertEqual(by_code["en-IN"]["native_name"], "English")
+        self.assertEqual(by_code["hi-IN"]["native_name"], "हिन्दी")
+        self.assertEqual(by_code["ur-IN"]["native_name"], "اردو")
+        self.assertEqual(by_code["pa-IN"]["native_name"], "ਪੰਜਾਬੀ")
+        self.assertEqual(by_code["or-IN"]["native_name"], "ଓଡ଼ିଆ")
+
+    def test_edge_voice_map_covers_punjabi_and_urdu(self):
+        self.assertIn("pa-in", _INDIAN_VOICE_MAP)
+        self.assertIn("ur-in", _INDIAN_VOICE_MAP)
+        self.assertIn("hi-in", _INDIAN_VOICE_MAP)
+        self.assertIn("te-in", _INDIAN_VOICE_MAP)
+
     def test_per_language_test_sentences(self):
         self.assertEqual(
             language_test_text("te-IN"),
@@ -511,6 +563,62 @@ class MultilingualVoiceTests(unittest.TestCase):
         )
         self.assertEqual(language_test_text("hi-IN"), "वॉइस असिस्टेंट परीक्षण सफल रहा।")
         self.assertEqual(language_test_text("en-IN"), "Voice assistant test successful.")
+
+    def test_all_risk_levels_exist_for_every_language(self):
+        codes = ("en-IN", "hi-IN", "te-IN", "ta-IN", "kn-IN", "ml-IN",
+                 "mr-IN", "gu-IN", "bn-IN", "pa-IN", "or-IN", "ur-IN")
+        for code in codes:
+            for level in ("SAFE", "MEDIUM", "HIGH", "CRITICAL"):
+                msg = build_voice_message(level, direction="LEFT", ttc=1.5, language=code)
+                self.assertEqual(
+                    msg["spoken_language"], code,
+                    f"{level} for {code} must speak {code}, got {msg['spoken_language']}",
+                )
+                self.assertTrue(msg["text"].strip(), f"{level} for {code} has empty text")
+                self.assertEqual(msg["priority"], PRIORITY_MAP[level])
+
+    def test_direction_phrases_exist_for_every_language(self):
+        codes = ("en-IN", "hi-IN", "te-IN", "ta-IN", "kn-IN", "ml-IN",
+                 "mr-IN", "gu-IN", "bn-IN", "pa-IN", "or-IN", "ur-IN")
+        for code in codes:
+            left = build_voice_message("MEDIUM", direction="LEFT", language=code)["text"]
+            right = build_voice_message("MEDIUM", direction="RIGHT", language=code)["text"]
+            ahead = build_voice_message("MEDIUM", direction="AHEAD", language=code)["text"]
+            self.assertNotEqual(left, right, f"LEFT==RIGHT for {code}")
+            self.assertTrue(ahead.strip(), f"AHEAD empty for {code}")
+
+    def test_same_track_speed_spoken_in_selected_language(self):
+        hi = build_voice_message(
+            "HIGH", direction="LEFT", speed_kmh=48.0, include_speed=True,
+            track_id=12, language="hi-IN",
+        )
+        self.assertEqual(hi["speed_kmh"], 48)
+        self.assertIn("48", hi["text"])
+        self.assertIn("12", hi["text"])
+        self.assertIn("जोखिम", hi["text"])
+        en = build_voice_message(
+            "HIGH", direction="LEFT", speed_kmh=48.0, include_speed=True,
+            track_id=12, language="en-IN",
+        )
+        self.assertIn("48", en["text"])
+        self.assertIn("12", en["text"])
+
+    def test_invalid_speed_never_spoken_in_any_language(self):
+        msg = build_voice_message(
+            "HIGH", direction="LEFT", speed_kmh=float("nan"), include_speed=True,
+            track_id=12, language="en-IN",
+        )
+        self.assertFalse(msg["speed_valid"])
+        self.assertIsNone(msg["speed_kmh"])
+        self.assertNotIn("NaN", msg["text"])
+        self.assertNotIn("kilometers per hour", msg["text"])
+        msg2 = build_voice_message(
+            "HIGH", direction="LEFT", speed_kmh=-5.0, include_speed=True,
+            track_id=12, language="hi-IN",
+        )
+        self.assertFalse(msg2["speed_valid"])
+        self.assertNotIn("किलोमीटर", msg2["text"])
+        self.assertNotIn("-5", msg2["text"])
 
 
 class VoiceMessageShapeTests(unittest.TestCase):

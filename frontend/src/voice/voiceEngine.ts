@@ -45,13 +45,20 @@ export type VoiceEngineListener = (state: VoiceAssistantState, detail?: string) 
 /** Honest active-voice info for the HUD status line. */
 export interface VoiceEngineInfo {
   available: boolean;
+  provider: string;
   voicesCount: number;
-  requestedLanguage: string;
-  /** Voice actually matched for the requested language, if any. */
-  activeVoiceName: string | null;
-  activeLanguage: string | null;
+  requestedLocale: string;
+  /** Voice actually matched for the requested locale, if any. */
+  selectedVoiceName: string | null;
+  selectedVoiceLocale: string | null;
+  /** true when a same-language fallback voice (e.g. ``hi``) was used. */
+  fallbackVoiceAvailable: boolean;
   /** true when the active voice does NOT match the requested language. */
   isFallback: boolean;
+  /** true when the requested language has an exact browser voice. */
+  exactVoiceAvailable: boolean;
+  /** true when a usable voice could be resolved for the requested language. */
+  supported: boolean;
 }
 
 interface PlaybackItem {
@@ -99,6 +106,7 @@ export class VoiceEngine {
   private lastResumeAt = 0;
   private voiceRetryTimer: number | null = null;
   private watchdogTimer: number | null = null;
+  private _voicesReadyEmitted = false;
 
   constructor() {
     this.ttsAvailable = this.detectTts();
@@ -132,6 +140,15 @@ export class VoiceEngine {
       this.voices = [];
     }
     this.voicesLoaded = this.voices.length > 0;
+    // Re-render the HUD diagnostics once voices become available.
+    if (this.voicesLoaded && !this._voicesReadyEmitted) {
+      this._voicesReadyEmitted = true;
+      const first = this.voices[0];
+      console.info(
+        `VOICE VOICES READY count=${this.voices.length} sample="${first?.name ?? 'none'}" ${first?.lang ?? ''}`.trim(),
+      );
+      this.listeners.forEach((l) => l(this.state, this.lastSpokenText));
+    }
     // Fallback for engines where `voiceschanged` never fires: probe a few times.
     if (!this.voicesLoaded && this.voiceRetryTimer === null) {
       let tries = 0;
@@ -152,6 +169,10 @@ export class VoiceEngine {
           console.info(
             `VOICE VOICES READY count=${this.voices.length} sample="${first?.name ?? 'none'}" ${first?.lang ?? ''}`.trim(),
           );
+          if (!this._voicesReadyEmitted) {
+            this._voicesReadyEmitted = true;
+            this.listeners.forEach((l) => l(this.state, this.lastSpokenText));
+          }
         }
       }, 250);
     }
@@ -196,16 +217,31 @@ export class VoiceEngine {
     if (!active) active = this.pickVoice(this.lang, false) as SpeechSynthesisVoice | null;
     const requested = this.lang || DEFAULT_LANG;
     const target = requested.toLowerCase().replace('_', '-');
-    const isExact = !!active && active.lang.toLowerCase().replace('_', '-') === target;
-    const isBase = !!active && !isExact && active.lang.toLowerCase().startsWith(target.split('-')[0]);
+    const baseLang = target.split('-')[0];
+    const exact = !!active && active.lang.toLowerCase().replace('_', '-') === target;
+    const base =
+      !!active && !exact && active.lang.toLowerCase().replace('_', '-').split('-')[0] === baseLang;
     return {
       available: this.ttsAvailable,
+      provider: this.ttsAvailable ? 'Browser SpeechSynthesis' : 'Web Speech API unavailable',
       voicesCount: voices.length,
-      requestedLanguage: requested,
-      activeVoiceName: active ? `${active.name}` : null,
-      activeLanguage: active ? active.lang : null,
-      isFallback: !!active && !isExact && !isBase,
+      requestedLocale: requested,
+      selectedVoiceName: active ? active.name : null,
+      selectedVoiceLocale: active ? active.lang : null,
+      fallbackVoiceAvailable: base,
+      isFallback: !!active && !exact && !base,
+      exactVoiceAvailable: exact,
+      supported: this.ttsAvailable && voices.length > 0 && (exact || base),
     };
+  }
+
+  /**
+   * Diagnostics snapshot (Phase 19): requested locale, whether an exact or
+   * same-language fallback voice was found, the chosen voice, provider and
+   * supported flag. Used by the HUD status panel and dev console.
+   */
+  getVoiceDiagnostics(): VoiceEngineInfo {
+    return this.getVoiceInfo();
   }
 
   subscribe(listener: VoiceEngineListener): () => void {

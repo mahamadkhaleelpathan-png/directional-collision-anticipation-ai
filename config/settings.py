@@ -148,7 +148,7 @@ class Settings:
     VOICE_VOLUME: float = field(
         default_factory=lambda: float(os.getenv("VOICE_VOLUME", "1.0"))
     )
-    VOICE_LANGUAGE: str = field(default_factory=lambda: os.getenv("VOICE_LANGUAGE", "te-IN"))
+    VOICE_LANGUAGE: str = field(default_factory=lambda: os.getenv("VOICE_LANGUAGE", "en-IN"))
     VOICE_VOICE: str = field(default_factory=lambda: os.getenv("VOICE_VOICE", ""))
     # Alerts below this level produce no voice output (SAFE, LOW, MEDIUM, ...).
     VOICE_MIN_ALERT_LEVEL: str = field(

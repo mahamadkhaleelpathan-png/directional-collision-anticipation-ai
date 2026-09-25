@@ -22,22 +22,53 @@ export const VOICE_LANGUAGE_CODES = [
 
 export type VoiceLanguageCode = (typeof VOICE_LANGUAGE_CODES)[number];
 
-export const DEFAULT_VOICE_LANGUAGE: VoiceLanguageCode = 'te-IN';
+export const DEFAULT_VOICE_LANGUAGE: VoiceLanguageCode = 'en-IN';
+
+/** One central client-side table: id, English name, native name (Phase 2). */
+export interface VoiceLanguageMeta {
+  id: VoiceLanguageCode;
+  name: string;
+  nativeName: string;
+}
+
+export const VOICE_LANGUAGES: VoiceLanguageMeta[] = [
+  { id: 'en-IN', name: 'English', nativeName: 'English' },
+  { id: 'hi-IN', name: 'Hindi', nativeName: 'हिन्दी' },
+  { id: 'te-IN', name: 'Telugu', nativeName: 'తెలుగు' },
+  { id: 'ta-IN', name: 'Tamil', nativeName: 'தமிழ்' },
+  { id: 'kn-IN', name: 'Kannada', nativeName: 'ಕನ್ನಡ' },
+  { id: 'ml-IN', name: 'Malayalam', nativeName: 'മലയാളം' },
+  { id: 'mr-IN', name: 'Marathi', nativeName: 'मराठी' },
+  { id: 'gu-IN', name: 'Gujarati', nativeName: 'ગુજરાતી' },
+  { id: 'bn-IN', name: 'Bengali', nativeName: 'বাংলা' },
+  { id: 'pa-IN', name: 'Punjabi', nativeName: 'ਪੰਜਾਬੀ' },
+  { id: 'or-IN', name: 'Odia', nativeName: 'ଓଡ଼ିଆ' },
+  { id: 'ur-IN', name: 'Urdu', nativeName: 'اردو' },
+];
 
 export const VOICE_LANGUAGE_LABELS: Record<VoiceLanguageCode, string> = {
-  'en-IN': 'English (India)',
-  'hi-IN': 'हिन्दी (Hindi)',
-  'te-IN': 'తెలుగు (Telugu)',
-  'ta-IN': 'தமிழ் (Tamil)',
-  'kn-IN': 'ಕನ್ನಡ (Kannada)',
-  'ml-IN': 'മലയാളം (Malayalam)',
-  'mr-IN': 'मराठी (Marathi)',
-  'gu-IN': 'ગુજરાતી (Gujarati)',
-  'bn-IN': 'বাংলা (Bengali)',
-  'pa-IN': 'ਪੰਜਾਬੀ (Punjabi)',
-  'or-IN': 'ଓଡ଼ିଆ (Odia)',
-  'ur-IN': 'اردو (Urdu)',
+  'en-IN': 'English',
+  'hi-IN': 'हिन्दी',
+  'te-IN': 'తెలుగు',
+  'ta-IN': 'தமிழ்',
+  'kn-IN': 'ಕನ್ನಡ',
+  'ml-IN': 'മലയാളം',
+  'mr-IN': 'मराठी',
+  'gu-IN': 'ગુજરાતી',
+  'bn-IN': 'বাংলা',
+  'pa-IN': 'ਪੰਜਾਬੀ',
+  'or-IN': 'ଓଡ଼ିଆ',
+  'ur-IN': 'اردو',
 };
+
+/** Selector label: native name + English name, e.g. "हिन्दी - Hindi". */
+export function languageSelectorLabel(code: VoiceLanguageCode): string {
+  const meta = VOICE_LANGUAGES.find((m) => m.id === code);
+  if (!meta) return code;
+  return meta.nativeName === meta.name
+    ? meta.name
+    : `${meta.nativeName} - ${meta.name}`;
+}
 
 /** "Test voice" sentences per language (mirrors backend item 48). */
 export const VOICE_TEST_TEXT_BY_LANG: Record<VoiceLanguageCode, string> = {
