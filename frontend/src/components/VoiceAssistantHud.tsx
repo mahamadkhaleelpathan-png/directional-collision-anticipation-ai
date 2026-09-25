@@ -30,6 +30,7 @@ interface VoiceAssistantHudProps {
   micAvailable: boolean;
   currentLanguage: string;
   lastAlert: VoiceAlert | null;
+  voiceInfo: string;
   onToggleEnabled: () => void;
   onToggleMuted: () => void;
   onVolumeChange: (v: number) => void;
@@ -56,6 +57,16 @@ const STATE_CFG: Record<VoiceAssistantState, { label: string; dot: string; text:
   MUTED: { label: 'MUTED', dot: 'bg-hud-dim', text: 'text-hud-dim' },
   ERROR: { label: 'ERROR', dot: 'bg-hud-red shadow-glowRed', text: 'text-hud-red' },
   OFFLINE: { label: 'OFFLINE', dot: 'bg-hud-red shadow-glowRed', text: 'text-hud-red' },
+  BLOCKED: {
+    label: 'BLOCKED',
+    dot: 'bg-hud-amber shadow-glowRed',
+    text: 'text-hud-amber',
+  },
+  NO_VOICE: {
+    label: 'NO VOICE',
+    dot: 'bg-hud-red shadow-glowRed',
+    text: 'text-hud-red',
+  },
 };
 
 function AlertRow({ label, value }: { label: string; value: string }) {
@@ -168,6 +179,18 @@ export function VoiceAssistantHud(props: VoiceAssistantHudProps) {
             value={alert?.ttc_seconds ?? alert?.ttc != null ? `${alert?.ttc_seconds ?? alert?.ttc}s` : '—'}
           />
           <AlertRow label="LANG" value={alert?.language ?? props.currentLanguage} />
+        </div>
+      </div>
+
+      {/* Honest voice status (active vs requested voice) */}
+      <div className="mb-4 rounded-lg border border-hud-border/60 bg-hud-panel2/60 p-3">
+        <div className="mb-1.5 flex items-center gap-1 font-hud text-[10px] tracking-widest text-hud-dim">
+          <Volume2 className="h-3 w-3 text-hud-cyan" />
+          VOICE STATUS
+        </div>
+        <div className="space-y-1">
+          <AlertRow label="ENABLED" value={props.enabled ? (props.muted ? 'MUTED' : 'ON') : 'OFF'} />
+          <AlertRow label="ACTIVE VOICE" value={props.voiceInfo || '—'} />
         </div>
       </div>
 

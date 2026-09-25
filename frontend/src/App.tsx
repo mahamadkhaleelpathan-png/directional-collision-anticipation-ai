@@ -20,6 +20,16 @@ import { VOICE_PRIORITIES } from './voice/voiceEngine';
 import { DEFAULT_VOICE_LANGUAGE, isSupportedLanguage } from './voice/languages';
 import type { JobSnapshot, VoiceAlert, VoiceAssistantState } from './types';
 
+/** Honest one-line voice status for the HUD (Phase 6/7 status panel). */
+function voiceEngineStatusText(): string {
+  const info = voiceEngine.getVoiceInfo();
+  if (!info.available) return 'Web Speech API unavailable';
+  if (info.voicesCount === 0) return 'no voices found — restart browser';
+  if (!info.activeVoiceName) return `${info.requestedLanguage} (default voice)`;
+  const fallback = info.isFallback ? ' fallback' : '';
+  return `${info.activeLanguage} · ${info.activeVoiceName}${fallback}`;
+}
+
 interface SelectedVideo {
   file_path: string;
   file_name: string;
@@ -449,6 +459,7 @@ export default function App() {
                   micAvailable={micAvailable}
                   currentLanguage={voiceLanguage}
                   lastAlert={lastVoiceAlert}
+                  voiceInfo={voiceEngineStatusText()}
                   onToggleEnabled={() => {
                     const next = !voiceEnabled;
                     setVoiceEnabled(next);

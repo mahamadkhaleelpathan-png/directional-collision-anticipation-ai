@@ -11,11 +11,21 @@
  * - Per-utterance language: the backend's message language is applied to each
  *   SpeechSynthesisUtterance and the best matching browser voice is selected
  *   for that locale (live language switching from the HUD).
+ * - Robustness against real browser bugs:
+ *     * voices are pre-loaded (getVoices() may be empty at script load; we
+ *       listen for `voiceschanged` and retry-poll a few times),
+ *     * Chrome can silently stop firing `onend` (utterance "stuck") — a
+ *       watchdog recovers the queue instead of freezing,
+ *     * Chrome auto-pauses speech output after a while — the watchdog calls
+ *       resume() while speaking,
+ *     * an utterance that never starts (autoplay blocked / no usable voice)
+ *       is reported as BLOCKED/NO_VOICE instead of staying SPEAKING forever.
  * - Mute, volume, enable/disable, live language and a self-test are exposed
- *   for the HUD.
+ *   for the HUD, plus an honest ACTIVE VOICE status line.
  * - Threat-to-speech latency is measured (enqueue -> onstart) and logged.
  *
- * No new dependencies and no hard-coded secrets; everything runs client-side.
+ * Single shared instance (see `voiceEngine` below) — React never creates a
+ * second engine, so there are never duplicate speechSynthesis listeners.
  */
 import {
   VOICE_PRIORITIES as VOICE_PRIORITIES_,
@@ -32,6 +42,18 @@ export const VOICE_PRIORITIES = VOICE_PRIORITIES_;
 
 export type VoiceEngineListener = (state: VoiceAssistantState, detail?: string) => void;
 
+/** Honest active-voice info for the HUD status line. */
+export interface VoiceEngineInfo {
+  available: boolean;
+  voicesCount: number;
+  requestedLanguage: string;
+  /** Voice actually matched for the requested language, if any. */
+  activeVoiceName: string | null;
+  activeLanguage: string | null;
+  /** true when the active voice does NOT match the requested language. */
+  isFallback: boolean;
+}
+
 interface PlaybackItem {
   id: string;
   text: string;
@@ -43,6 +65,16 @@ interface PlaybackItem {
 
 const MAX_QUEUE = 20;
 const DEFAULT_LANG = DEFAULT_VOICE_LANGUAGE;
+
+/** Utterance that never fired onstart within this window is treated as blocked. */
+const BLOCKED_AFTER_MS = 2500;
+/** Utterance whose onend never fires within this window is treated as stalled. */
+const STALL_AFTER_MS = 1200;
+/** Periodically resume(); defeats Chrome's automatic voice auto-pause. */
+const RESUME_EVERY_MS = 1000;
+/** Watchdog poll cadence. */
+const WATCHDOG_MS = 300;
+
 let instanceCounter = 0;
 
 export class VoiceEngine {
@@ -56,20 +88,30 @@ export class VoiceEngine {
   private state: VoiceAssistantState = 'IDLE';
   private listeners: Set<VoiceEngineListener> = new Set();
   private ttsAvailable = false;
-  private lastSpokenText = '';
   private voices: SpeechSynthesisVoice[] = [];
+  private voicesLoaded = false;
+  private lastSpokenText = '';
+  private activeVoice: SpeechSynthesisVoice | null = null;
+  private started = false;
+  private utterAt = 0;
+  private blockedReported = false;
+  private stalledReported = false;
+  private lastResumeAt = 0;
+  private voiceRetryTimer: number | null = null;
+  private watchdogTimer: number | null = null;
 
   constructor() {
     this.ttsAvailable = this.detectTts();
     if (this.ttsAvailable) {
+      this.loadVoices();
       try {
-        this.voices = window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = () => {
-          this.voices = window.speechSynthesis.getVoices();
+          this.loadVoices();
         };
       } catch {
-        this.voices = [];
+        /* older engines: retry-poll below */
       }
+      this.startWatchdog();
     }
   }
 
@@ -80,6 +122,38 @@ export class VoiceEngine {
       return typeof window !== 'undefined' && 'speechSynthesis' in window;
     } catch {
       return false;
+    }
+  }
+
+  private loadVoices(): void {
+    try {
+      this.voices = window.speechSynthesis.getVoices();
+    } catch {
+      this.voices = [];
+    }
+    this.voicesLoaded = this.voices.length > 0;
+    // Fallback for engines where `voiceschanged` never fires: probe a few times.
+    if (!this.voicesLoaded && this.voiceRetryTimer === null) {
+      let tries = 0;
+      this.voiceRetryTimer = window.setInterval(() => {
+        tries += 1;
+        try {
+          this.voices = window.speechSynthesis.getVoices();
+        } catch {
+          this.voices = [];
+        }
+        this.voicesLoaded = this.voices.length > 0;
+        if (this.voicesLoaded || tries >= 8) {
+          if (this.voiceRetryTimer !== null) window.clearInterval(this.voiceRetryTimer);
+          this.voiceRetryTimer = null;
+        }
+        if (this.voicesLoaded) {
+          const first = this.voices[0];
+          console.info(
+            `VOICE VOICES READY count=${this.voices.length} sample="${first?.name ?? 'none'}" ${first?.lang ?? ''}`.trim(),
+          );
+        }
+      }, 250);
     }
   }
 
@@ -115,6 +189,25 @@ export class VoiceEngine {
     return this.lastSpokenText;
   }
 
+  /** Honest status: what voice is available/active vs what was requested. */
+  getVoiceInfo(): VoiceEngineInfo {
+    const voices = this.voices.length ? this.voices : [];
+    let active = this.activeVoice;
+    if (!active) active = this.pickVoice(this.lang, false) as SpeechSynthesisVoice | null;
+    const requested = this.lang || DEFAULT_LANG;
+    const target = requested.toLowerCase().replace('_', '-');
+    const isExact = !!active && active.lang.toLowerCase().replace('_', '-') === target;
+    const isBase = !!active && !isExact && active.lang.toLowerCase().startsWith(target.split('-')[0]);
+    return {
+      available: this.ttsAvailable,
+      voicesCount: voices.length,
+      requestedLanguage: requested,
+      activeVoiceName: active ? `${active.name}` : null,
+      activeLanguage: active ? active.lang : null,
+      isFallback: !!active && !isExact && !isBase,
+    };
+  }
+
   subscribe(listener: VoiceEngineListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -140,7 +233,19 @@ export class VoiceEngine {
     } else if (this.muted) {
       this.setState('MUTED');
     } else {
-      this.setState('MONITORING');
+      this.blockedReported = false;
+      this.stalledReported = false;
+      // Chrome requires a user gesture before audio may play; resume() here
+      // (called from a click handler) unlocks the synthesis engine.
+      if (this.ttsAvailable) {
+        try {
+          window.speechSynthesis.resume();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (this.queue.length) this.playNext();
+      else this.setState('MONITORING');
     }
   }
 
@@ -150,6 +255,13 @@ export class VoiceEngine {
       this.cancelSpeakingOnly();
       this.setState('MUTED');
     } else if (this.state === 'MUTED') {
+      if (this.ttsAvailable) {
+        try {
+          window.speechSynthesis.resume();
+        } catch {
+          /* ignore */
+        }
+      }
       if (this.queue.length) this.playNext();
       else this.setState('MONITORING');
     }
@@ -197,6 +309,17 @@ export class VoiceEngine {
 
   /** "Test voice" button: plays the per-language test line (item 48). */
   test(text?: string): void {
+    if (!this.ttsAvailable) {
+      this.setState('OFFLINE', 'Web Speech API unavailable');
+      return;
+    }
+    try {
+      window.speechSynthesis.resume();
+    } catch {
+      /* ignore */
+    }
+    // Unlock voices that were still loading.
+    if (!this.voicesLoaded) this.loadVoices();
     const lang = this.lang as VoiceLanguageCode;
     this.enqueue({
       id: this.nextItemId(),
@@ -223,9 +346,17 @@ export class VoiceEngine {
     const speakingPriority = this.speaking ? this.speaking.priority : -1;
     if (full.priority > speakingPriority) this.cancelSpeakingOnly();
 
+    if (this.queue.length >= MAX_QUEUE) {
+      // Never drop the newest high-priority item: drop the LOWEST-priority
+      // pending item instead of the newest (keeps CRITICAL/HIGH alive).
+      const lowest = this.queue[this.queue.length - 1];
+      if (full.priority <= lowest.priority && this.queue.length > 0) {
+        return; // new item is not more important than what we already hold
+      }
+      this.queue.pop(); // remove the current lowest-priority pending item
+    }
     this.queue.push(full);
     this.queue.sort((a, b) => b.priority - a.priority || b.id.localeCompare(a.id));
-    if (this.queue.length > MAX_QUEUE) this.queue = this.queue.slice(0, MAX_QUEUE);
 
     if (!this.speaking) this.playNext();
   }
@@ -239,6 +370,9 @@ export class VoiceEngine {
     if (this.utter && this.ttsAvailable) {
       try {
         window.speechSynthesis.cancel();
+        // Chrome sometimes needs a resume() after cancel() before the next
+        // speak() will produce audio.
+        window.speechSynthesis.resume();
       } catch {
         // browser quirks are harmless: handlers are still detached below
       }
@@ -250,21 +384,94 @@ export class VoiceEngine {
     }
     this.utter = null;
     this.speaking = null;
+    this.started = false;
+    this.activeVoice = null;
+    this.blockedReported = false;
+    this.stalledReported = false;
   }
 
-  private pickVoice(lang: string): SpeechSynthesisVoice | null {
+  private pickVoice(lang: string, markActive = true): SpeechSynthesisVoice | null {
     try {
       const voices = this.voices.length ? this.voices : window.speechSynthesis.getVoices();
       if (!voices.length) return null;
       const target = lang.toLowerCase().replace('_', '-');
       const exact = voices.find((v) => v.lang.toLowerCase().replace('_', '-') === target);
-      if (exact) return exact;
+      if (exact) {
+        if (markActive) this.activeVoice = exact;
+        return exact;
+      }
       const base = target.split('-')[0];
-      return voices.find((v) => v.lang.toLowerCase().startsWith(base)) ?? null;
+      const baseMatch = voices.find((v) => v.lang.toLowerCase().startsWith(base)) ?? null;
+      if (markActive) this.activeVoice = baseMatch;
+      return baseMatch;
     } catch {
       return null;
     }
   }
+
+  // ------------------------------------------------------------ watchdog
+
+  private startWatchdog(): void {
+    if (this.watchdogTimer !== null) return;
+    this.watchdogTimer = window.setInterval(() => {
+      if (!this.utter || !this.ttsAvailable) return;
+      const now = Date.now();
+      const synth = window.speechSynthesis;
+      const age = now - this.utterAt;
+
+      // A) Chrome auto-pause: keep the synthesis engine awake while speaking.
+      if (this.started && synth.speaking && now - this.lastResumeAt >= RESUME_EVERY_MS) {
+        this.lastResumeAt = now;
+        try {
+          synth.resume();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
+      // B) Utterance never started (autoplay blocked / no usable voice).
+      if (!this.started && age >= BLOCKED_AFTER_MS) {
+        if (!this.blockedReported) {
+          this.blockedReported = true;
+          const msg = this.voicesLoaded
+            ? 'Audio blocked by the browser — click ENABLE VOICE once, then TEST VOICE'
+            : 'No usable speech voice found for this browser — speech is unavailable';
+          console.warn(`VOICE BLOCKED after ${age}ms (voices=${this.voices.length})`);
+          this.setState(this.voicesLoaded ? 'BLOCKED' : 'NO_VOICE', msg);
+        }
+        this.cancelSpeakingOnly();
+        // Keep the queue; the next real event (or user enable/re-test) retries.
+        this.queue = [];
+        this.setState(this.muted ? 'MUTED' : 'MONITORING');
+        return;
+      }
+
+      // C) Started but Chrome never fired onend (stalled utterance).
+      if (this.started && !synth.speaking && !synth.pending && age >= STALL_AFTER_MS) {
+        if (!this.stalledReported) {
+          this.stalledReported = true;
+          console.warn(`VOICE STALLED: onend not fired after ${age}ms — recovering queue`);
+        }
+        const failed = this.utter;
+        this.utter = null;
+        if (failed) {
+          failed.onend = null;
+          failed.onerror = null;
+        }
+        if (this.speaking) {
+          this.speaking = null;
+          this.started = false;
+          if (this.enabled && !this.muted) this.playNext();
+          return;
+        }
+        this.started = false;
+        this.setState(this.muted ? 'MUTED' : 'MONITORING');
+      }
+    }, WATCHDOG_MS);
+  }
+
+  // -------------------------------------------------------------- internal
 
   private playNext(): void {
     if (this.muted || !this.enabled) {
@@ -278,22 +485,30 @@ export class VoiceEngine {
     const item = this.queue.shift();
     if (!item) {
       this.speaking = null;
+      this.started = false;
       this.setState(this.muted ? 'MUTED' : 'MONITORING');
       return;
     }
     this.speaking = item;
     this.lastSpokenText = item.text;
+    this.blockedReported = false;
+    this.stalledReported = false;
 
     const utterance = new SpeechSynthesisUtterance(item.text);
     this.utter = utterance;
+    this.started = false;
+    this.utterAt = Date.now();
     utterance.lang = item.lang || this.lang;
     utterance.volume = this.volume;
+    // Safety-alert pacing: not too fast, not too slow.
     utterance.rate = 1;
     utterance.pitch = 1;
     const voice = this.pickVoice(item.lang);
     if (voice) utterance.voice = voice;
     const enqueuedAt = item.enqueuedAt || Date.now();
     utterance.onstart = () => {
+      this.started = true;
+      this.utterAt = Date.now();
       const latencyMs = Date.now() - enqueuedAt;
       console.info(`VOICE PLAYBACK START latency_ms=${latencyMs} lang=${item.lang}`);
       this.setState('SPEAKING', item.text);
@@ -305,8 +520,8 @@ export class VoiceEngine {
       this.finishPlayback(item);
     };
 
-    this.setState('SPEAKING', item.text);
     try {
+      window.speechSynthesis.resume();
       window.speechSynthesis.speak(utterance);
     } catch {
       this.setState('ERROR', 'TTS speak failed');
@@ -323,6 +538,7 @@ export class VoiceEngine {
     }
     if (this.speaking && this.speaking.id !== item.id) return; // stale callback
     this.speaking = null;
+    this.started = false;
 
     if (this.enabled && !this.muted) this.playNext();
     else this.setState(this.muted ? 'MUTED' : 'MONITORING');

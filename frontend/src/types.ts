@@ -265,7 +265,9 @@ export type VoiceAssistantState =
   | 'SPEAKING'
   | 'MUTED'
   | 'ERROR'
-  | 'OFFLINE';
+  | 'OFFLINE'
+  | 'BLOCKED'
+  | 'NO_VOICE';
 
 export interface VoiceQueryResponse {
   job_id: string;
